@@ -29,8 +29,6 @@ spmeans = ddply(field, .(species), summarize,
 
 spmeans
 
-apply(spmeans[,c(4,6,8)], 2, function(x) 100*var(log(x)))
-
 popmeans = ddply(field, .(species, pop), summarize,
                  n = length(pop),
                  GSD = mean(GSD, na.rm=T),
@@ -38,14 +36,14 @@ popmeans = ddply(field, .(species, pop), summarize,
                  ASD = mean(ASD, na.rm=T))
 
 popmeans[order(popmeans$n),]
-drop = which(popmeans$n<3)
+drop = which(popmeans$n<3) # Drop populations with very small sample size
 popmeans = popmeans[-drop,]
-
-scameans = popmeans[popmeans$species=="S", ]
 
 table(popmeans$species) # Pops per species
 
-# Combined figure
+scameans = popmeans[popmeans$species=="S", ]
+
+# Figure 2
 x11(height=5, width=9)
 
 #cairo_pdf("Fig2.pdf", height=5, width=9, family = "Times")
@@ -74,6 +72,9 @@ mtext("Departure from optimum (GSD-GAD, mm)", 2, line=2.5)
 
 points(scameans$ASD, scameans$GSD-scameans$GAD, cex=sqrt(scameans$n)/2, 
        xlab="", ylab="", las=1, col="blue")
+#points(tapply(popmeans$ASD, popmeans$species, mean), tapply(popmeans$GSD-popmeans$GAD, popmeans$species, mean), 
+#       cex=1, pch=16, 
+#       xlab="", ylab="", las=1, col="black")
 
 dev.off()
 
@@ -86,6 +87,7 @@ dt$ind = dt$PlantID
 dt$animal = dt$PlantID
 dt$GSD = apply(subset(dt, select=c(GSDl, GSDc, GSDr)), 1, mean, na.rm=T)
 
+# Select variables, mean-scale and multiply by 100 for better mixing
 X = subset(dt, select=c(GAD, GSD, ASD, animal, ind, Mother, Date, stage))
 X[,1:length(nms)] = apply(X[,1:length(nms)], 2, function(x) 100*x/mean(x, na.rm=T))
 
@@ -96,14 +98,13 @@ names(ped) = c("animal", "dam", "sire")
 
 ped2 = MCMCglmm::prunePed(ped, X$animal)
 ped2 = rbind(parentped, ped2)
-
 ped2$sire = as.factor(ped2$sire)
 
 invA = inverseA(ped2)$Ainv
 
 # Set sampling parameters for MCMCglmm analysis
 samples = 1000
-thin = 500
+thin = 50
 burnin = samples*thin*.5
 nitt = (samples*thin)+burnin
 
@@ -134,30 +135,33 @@ filename = paste0("GMatFit_", "thin_", thin, ".RData")
 load(file="GMatFit_thin_500.RData")
 
 n = length(nms)
-gmat = matrix(apply(mod$VCV, 2, median)[1:(n*n)], nrow=n)/100
-colnames(gmat) = rownames(gmat) = names(X)[1:length(nms)]
-round(gmat, 3)
-round(cov2cor(gmat), 2)
+gmat = matrix(apply(mod$VCV, 2, median)[1:(n*n)], nrow=n)/10000 # Divide by 10000 because data were multiplied by 100
+gmat = gmat*100 # Percent units
+colnames(gmat) = rownames(gmat) = nms
+round(gmat, 3) #G-matrix
+round(cov2cor(gmat), 2) #Correlation matrix
 
+# Credible intervals
 q = apply(mod$VCV, 2, quantile, c(0.025, 0.975))
-round(q/100, 3)[,1:9]
+t(round(q/100, 3)[,1:9])
 
-evolvabilityMeans(gmat[1:3, 1:3])
+round(evolvabilityMeans(gmat[1:3, 1:3]), 3) # Means over the G-matrix
 
-ci = evolvabilityMeansMCMC(mod$VCV[,1:(n*n)])
-ci$post.medians/100
+ci = evolvabilityMeansMCMC(mod$VCV[,1:(n*n)]/10000)
+round(ci$post.medians*100, 3)
 
 # Random selection gradients
 set.seed(99)
 betas = randomBeta(1000, 3)
 
-evolvabilityBeta(gmat[1:3, 1:3], Beta=c(1,0,0))$a # GAD: a = 80.4 (Tulum 77.7)
-evolvabilityBeta(gmat[1:3, 1:3], Beta=c(0,1,0))$a #GSD: a = 77.9 (Tulum 82.4)
-evolvabilityBeta(gmat[1:3, 1:3], Beta=c(0,0,1))$a #ASD: a = 84.8 (Tulum 82.0)
+evolvabilityBeta(gmat[1:3, 1:3], Beta=c(1,0,0))$a # GAD: a = 80.4
+evolvabilityBeta(gmat[1:3, 1:3], Beta=c(0,1,0))$a #GSD: a = 77.9
+evolvabilityBeta(gmat[1:3, 1:3], Beta=c(0,0,1))$a #ASD: a = 84.8
 
 out = evolvabilityBeta(gmat[1:3, 1:3], betas)
 str(out)
 
+# Figure 3
 x11(height=3.5, width=9)
 
 #cairo_pdf("Fig3.pdf", height=3.5, width=9, fam="Times")
@@ -188,10 +192,10 @@ unique(dat$population)
 length(unique(dat$population))
 table(dat$population)
 
+# Mean P matrix
 pdat = dat[dat$population %in% c("S1","S2","S6","S7","S8","S9","S11","S12","S20","S21","S22","S26"),]
 pdat = na.omit(subset(pdat, select=c(GAD, GSD, ASD, population)))
 
-# Mean P matrix
 pops = unique(pdat$population)
 length(pops)
 
@@ -219,7 +223,7 @@ df = df[,-1]
 df
 
 X = subset(dat, select=c(GAD, GSD, ASD, population, ind))
-X[,1:length(nms)] = apply(X[,1:length(nms)], 2, function(x) 10*log(x))
+X[,1:length(nms)] = apply(X[,1:length(nms)], 2, function(x) 10*log(x)) #Ln-transform and multiply by 10 for mixing reasons
 X = na.omit(X)
 head(X)
 str(X)
@@ -248,14 +252,12 @@ Sys.time() - a
 
 # 4. Estimating the species-level D matrix ####
 field = read.csv("data/field2.csv")
-
 dat = field
 
 dat = dat[-which(dat$species=="S2"),] # Exclude D. scandens taxon with near-zero ASD
 dat$ASD[which(dat$ASD==0)] = 0.1 # Setting a single ASD=0 blossom to ASD=0.1
 
 X = subset(dat, select=c(GAD, GSD, ASD, species, pop, patch))
-
 X[,1:length(nms)] = apply(X[,1:length(nms)], 2, function(x) 10*log(x))
 X = na.omit(X)
 X$patch = as.factor(paste0(X$pop, X$patch))
@@ -264,6 +266,7 @@ head(X)
 str(X)
 table(dat$species)
 length(unique(dat$pop))
+length(unique(dat$species))
 
 hist(X$GAD, breaks=20)
 hist(X$GSD)
@@ -309,6 +312,7 @@ colnames(dmat) = rownames(dmat) = names(X)[1:length(nms)]
 round(dmat, 3)
 round(cov2cor(dmat), 2)
 
+# Eigenvectors etc.
 first_ev = eigen(gmat)$vectors[,1]
 gmax = evolvabilityBeta(gmat, Beta = first_ev)$e
 dmax = evolvabilityBeta(dmat, Beta = first_ev)$e
@@ -317,6 +321,7 @@ last_ev = eigen(gmat)$vectors[,nrow(gmat)]
 gmin = evolvabilityBeta(gmat, Beta = last_ev)$e
 dmin = evolvabilityBeta(dmat, Beta = last_ev)$e
 
+# Evolvabilities, autonomies, and divergence along random selection gradients
 set.seed(99)
 nbeta = 1000
 betas = randomBeta(nbeta, nrow(gmat))
@@ -325,6 +330,7 @@ cbeta = evolvabilityBeta(gmat, betas)$c
 abeta = evolvabilityBeta(gmat, betas)$a
 dbeta = evolvabilityBeta(dmat, betas)$e
 
+# Figure 4
 x11(height = 9, width = 9)
 
 #cairo_pdf("Fig4.pdf", height=8, width=8, fam="Times")
@@ -338,13 +344,13 @@ ymaxvals = na.omit(c(log10(dmax), log10(diag(dmat)), log10(dbeta)))
 plot(log10(ebeta), log10(dbeta), col="grey", las = 1,
      xlab="", xaxt="n", yaxt="n",
      ylab="",
-     xlim=c(min(xminvals[xminvals>-Inf]),max(xmaxvals[xmaxvals>-Inf])),
-     ylim=c(min(yminvals[yminvals>-Inf]),max(ymaxvals[ymaxvals>-Inf])))
+     xlim=c(min(xminvals[xminvals>-Inf]), max(xmaxvals[xmaxvals>-Inf])),
+     ylim=c(min(yminvals[yminvals>-Inf]), max(ymaxvals[ymaxvals>-Inf])))
 #legend("topleft", "(a)", bty="n")
 axis(1, at=seq(-0.4, 0.8, 0.2), signif(10^seq(-0.4, 0.8, 0.2), 2))
 
 x3at = seq(-0.5, 1, .3)
-x3 = (exp(sqrt(((10^x3at)/100)*(2/pi))))-1
+x3 = (exp(sqrt(((10^x3at)/100)*(2/pi))))-1 # Y-axis given as proportional divergence
 axis(2, at=x3at, signif(100*x3, 2), las=1)
 
 mtext("Population divergence (%)", side=2, line=2.5)
@@ -353,7 +359,7 @@ points(log10(diag(gmat)), log10(diag(dmat)), pch=16)
 points(log10(gmax), log10(dmax), col="red", pch=16)
 points(log10(gmin), log10(dmin), col="blue", pch=16)
 
-legend("bottomright", c(expression(paste(g[max])), expression(paste(g[min]))), pch=16, col=c("red","blue"))
+legend("bottomright", c(expression(paste(g[max])), expression(paste(g[min]))), pch=16, col=c("red", "blue"))
 
 xminvals = na.omit(c(log10(gmin), log10(diag(gmat)), log10(cbeta)))
 xmaxvals = na.omit(c(log10(gmax), log10(diag(gmat)), log10(cbeta)))
@@ -373,15 +379,15 @@ x3at = seq(-0.5, 1, .3)
 x3 = (exp(sqrt(((10^x3at)/100)*(2/pi))))-1
 axis(2, at=x3at, signif(100*x3, 2), las=1)
 
-cvals = NULL
+cvals = NULL # Conditional evolvabilities per trait (cond. on all other traits)
 for(i in 1:ncol(gmat)){
   b = rep(0, ncol(gmat))
   b[i] = 1
   cvals[i] = evolvabilityBeta(gmat, b)$c
 }
 
-points(log10(diag(gmat)),log10(diag(dmat)),pch=1, col="black")
-points(log10(cvals),log10(diag(dmat)),pch=16, col="black")
+points(log10(diag(gmat)), log10(diag(dmat)), pch=1, col="black")
+points(log10(cvals), log10(diag(dmat)), pch=16, col="black")
 arrows(log10(diag(gmat)), log10(diag(dmat)), log10(cvals), log10(diag(dmat)), code=2, length=0)
 
 points(log10(gmax), log10(dmax), col="red", pch=16)
@@ -392,14 +398,13 @@ load(file="Dmat_Species_thin_100.RData")
 
 dsmat = matrix(apply(mod$VCV, 2, median)[1:(n*n)], nrow=n)
 colnames(dsmat) = rownames(dsmat) = names(X)[1:length(nms)]
-
 round(dsmat, 3)
 round(cov2cor(dsmat), 2)
 
 # Compute eigenvectors etc.
 dsmax = evolvabilityBeta(dsmat, Beta = first_ev)$e
 dsmin = evolvabilityBeta(dsmat, Beta = last_ev)$e
-dsbeta = evolvabilityBeta(dsmat, betas)$e
+dsbeta = evolvabilityBeta(dsmat, betas)$e # Divergence along the random selection gradients
 
 xminvals = na.omit(c(log10(gmin), log10(diag(gmat)), log10(ebeta)))
 xmaxvals = na.omit(c(log10(gmax), log10(diag(gmat)), log10(ebeta)))
@@ -414,7 +419,6 @@ plot(log10(ebeta), log10(dsbeta), col="grey", las = 1,
 #legend("topleft", "(c)", bty="n")
 
 axis(1, at=seq(-0.4, 0.8, 0.2), signif(10^seq(-0.4, 0.8, 0.2), 2))
-
 x3at = seq(-0.8, 2, 0.2)
 x3 = (exp(sqrt(((10^x3at)/100)*(2/pi))))-1
 axis(2, at=x3at, signif(100*x3, 2), las=1)
@@ -439,7 +443,6 @@ plot(log10(cbeta), log10(dsbeta), col="grey", las = 1,
 #legend("topleft", "(d)", bty="n")
 
 axis(1, at=seq(-0.4, 0.8, 0.2), signif(10^seq(-0.4, 0.8, 0.2), 2))
-
 x3at = seq(-0.8, 2, 0.2)
 x3 = (exp(sqrt(((10^x3at)/100)*(2/pi))))-1
 axis(2, at=x3at, signif(100*x3, 2), las=1)
